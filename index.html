@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emotional Intelligence Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <!-- Luxon for date parsing/formatting -->
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.3/build/global/luxon.min.js"></script>
+  </head>
+  <body class="bg-gray-50 text-gray-800 p-8 font-sans">
+    <h1 class="text-3xl font-bold mb-4">Emotional Intelligence Tracker</h1>
+    <div class="flex gap-4 mb-6">
+      <input type="file" id="csvUpload" accept=".csv" class="p-2 border border-gray-300 rounded" />
+      <button id="clearStorage" class="bg-red-500 text-white px-4 py-2 rounded">Clear Saved Data</button>
+      <button id="downloadJson" class="bg-blue-500 text-white px-4 py-2 rounded">Export JSON</button>
+    </div>
+    <div id="report" class="space-y-10"></div>
+
+    <script>
+      const headers = { moodKey: "Mood", dateKey: "Date" };
+
+      document.getElementById("csvUpload").addEventListener("change", function (e) {
+        const headers = { moodKey: "Mood", dateKey: "Date" };
+
+        const file = e.target.files[0];
+        if (!file) return;
+        console.log("CSV file selected:", file.name);
+
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: function (results) {
+            console.log("CSV parsed results:", results);
+            const keys = Object.keys(results.data[0]);
+            // ----- Automatic column detection using heuristics -----
+            let moodKey, dateKey;
+            // Heuristic: date column should have the highest ratio of date-like values.
+            const looksLikeDate = (val) => {
+              if (!val) return false;
+              // quick regex checks for common formats
+              if (/\d{4}-\d{2}-\d{2}/.test(val)) return true; // ISO yyyy-mm-dd
+              if (/^[0-3]?\d[\/.-][0-3]?\d[\/.-](\d{2}|\d{4})$/.test(val)) return true; // 1/2/24 or 01-02-2024
+              // pattern like "2025 Sun Jun 22 1:33 PM"
+              if (/^\d{4}\s[A-Za-z]{3}\s[A-Za-z]{3}\s\d{1,2}\s\d{1,2}:\d{2}\s[AP]M$/.test(val)) return true;
+              // Fallback: try Luxon parseDate helper
+              try {
+                const dt = parseDate(val);
+                return dt && dt.isValid;
+              } catch (_) {
+                return false;
+              }
+            };
+
+            if (!moodKey || !dateKey) {
+              console.error(
+                "Could not automatically detect mood and date columns. Please ensure your CSV has columns for mood and date."
+              );
+              alert("Failed to detect mood and date columns in CSV. Please check the file format.");
+              // Use explicit column names from the CSV
+              const parsed = results.data.filter((row) => row[headers.moodKey] && row[headers.dateKey]);
+              console.log("Filtered parsed data:", parsed);
+              localStorage.setItem("ei_data", JSON.stringify({ entries: parsed, headers }));
+              generateMoodByMonth(parsed, headers);
+            } else {
+              console.log("Headers:", headers);
+              const parsed = results.data.filter((row) => row[headers.moodKey] && row[headers.dateKey]);
+              console.log("Filtered parsed data:", parsed);
+              localStorage.setItem("ei_data", JSON.stringify({ entries: parsed, headers }));
+              generateMoodByMonth(parsed, headers);
+            }
+          },
+        });
+      });
+
+      // ---- COLOR CONSTANTS ----
+      const COLORS = {
+        GREEN: "rgba(76, 175, 80, 0.8)", // 🟢 Low Energy Pleasant (bottom)
+        YELLOW: "rgba(255, 235, 59, 0.8)", // 🟡 High Energy Pleasant
+        BLUE: "rgba(33, 150, 243, 0.8)", // 🔵 Low Energy Unpleasant
+        RED: "rgba(244, 67, 54, 0.8)", // 🔴 High Energy Unpleasant (top)
+      };
+      // Order used for stack positioning (lower index = bottom)
+      const colorOrder = {
+        [COLORS.GREEN]: 0,
+        [COLORS.YELLOW]: 1,
+        [COLORS.BLUE]: 2,
+        [COLORS.RED]: 3,
+      };
+      // Map moods to COLORS values. Adjust as desired.
+      const moodColorMap = {
+        // Pleasant, low energy (GREEN)
+        Appreciated: COLORS.GREEN,
+        "At Ease": COLORS.GREEN,
+        Calm: COLORS.GREEN,
+        Mellow: COLORS.GREEN,
+        Chill: COLORS.GREEN,
+        Content: COLORS.GREEN,
+        Relaxed: COLORS.GREEN,
+        Balanced: COLORS.GREEN,
+        Fulfilled: COLORS.GREEN,
+        Comfortable: COLORS.GREEN,
+        Good: COLORS.GREEN,
+        Compassionate: COLORS.GREEN,
+        Accepted: COLORS.GREEN,
+        Blessed: COLORS.GREEN,
+        Hopeful: COLORS.GREEN,
+        Thoughtful: COLORS.GREEN,
+        Clear: COLORS.GREEN,
+        Connected: COLORS.GREEN,
+        Content: COLORS.GREEN,
+        Copacetic: COLORS.GREEN,
+        Contemplative: COLORS.GREEN,
+        Sympathetic: COLORS.GREEN,
+        Carefree: COLORS.GREEN,
+        Safe: COLORS.GREEN,
+        Thankful: COLORS.GREEN,
+        Included: COLORS.GREEN,
+        Loved: COLORS.GREEN,
+        Grateful: COLORS.GREEN,
+        Understood: COLORS.GREEN,
+        // Pleasant, high energy (YELLOW)
+        Happy: COLORS.YELLOW,
+        Engaged: COLORS.YELLOW,
+        Joyful: COLORS.YELLOW,
+        Cheerful: COLORS.YELLOW,
+        Challenged: COLORS.YELLOW,
+        Chatty: COLORS.YELLOW,
+        Competent: COLORS.YELLOW,
+        Confident: COLORS.YELLOW,
+        Curious: COLORS.YELLOW,
+        Delighted: COLORS.YELLOW,
+        Desired: COLORS.YELLOW,
+        Excited: COLORS.YELLOW,
+        Motivated: COLORS.YELLOW,
+        Focused: COLORS.YELLOW,
+        Playful: COLORS.YELLOW,
+        Accomplished: COLORS.YELLOW,
+        Upbeat: COLORS.YELLOW,
+        Enthusiastic: COLORS.YELLOW,
+        Enthralled: COLORS.YELLOW,
+        Enchanted: COLORS.YELLOW,
+        Proud: COLORS.YELLOW,
+        Challenged: COLORS.YELLOW,
+        Alive: COLORS.YELLOW,
+        Confident: COLORS.YELLOW,
+        // Unpleasant, low energy (BLUE)
+        Sad: COLORS.BLUE,
+        Depressed: COLORS.BLUE,
+        Bored: COLORS.BLUE,
+        Apathetic: COLORS.BLUE,
+        Exhausted: COLORS.BLUE,
+        Spent: COLORS.BLUE,
+        Bored: COLORS.BLUE,
+        Miserable: COLORS.BLUE,
+        Trapped: COLORS.BLUE,
+        Betrayed: COLORS.BLUE,
+        Discouraged: COLORS.BLUE,
+        Forlorn: COLORS.BLUE,
+        Minimized: COLORS.BLUE,
+        Humiliated: COLORS.BLUE,
+        Bleh: COLORS.BLUE,
+        Uncomfortable: COLORS.BLUE,
+        Meh: COLORS.BLUE,
+        Disengaged: COLORS.BLUE,
+        Lost: COLORS.BLUE,
+        Insecure: COLORS.BLUE,
+        Disappointed: COLORS.BLUE,
+        Disheartened: COLORS.BLUE,
+        Disillusioned: COLORS.BLUE,
+        "Dead Inside": COLORS.BLUE,
+        Vulnerable: COLORS.BLUE,
+        Frustrated: COLORS.BLUE,
+        Guilty: COLORS.BLUE,
+        Lonely: COLORS.BLUE,
+        Fatigued: COLORS.BLUE,
+        Scared: COLORS.BLUE,
+        Sick: COLORS.BLUE,
+        Tired: COLORS.BLUE,
+        Down: COLORS.BLUE,
+        Worried: COLORS.BLUE,
+        "Burned Out": COLORS.BLUE,
+        Burdened: COLORS.BLUE,
+        Ashamed: COLORS.BLUE,
+        Guilty: COLORS.BLUE,
+        // Unpleasant, high energy (RED)
+        Apprehensive: COLORS.RED,
+        Angry: COLORS.RED,
+        Jittery: COLORS.RED,
+        Anxious: COLORS.RED,
+        Frightened: COLORS.RED,
+        Concerned: COLORS.RED,
+        Distracted: COLORS.RED,
+        Alarmed: COLORS.RED,
+        Annoyed: COLORS.RED,
+        Irritated: COLORS.RED,
+        Nervous: COLORS.RED,
+        Tense: COLORS.RED,
+        Stressed: COLORS.RED,
+        Numb: COLORS.BLUE,
+        Optimistic: COLORS.YELLOW,
+        Overwhelmed: COLORS.RED,
+        Panicked: COLORS.RED,
+        Peaceful: COLORS.GREEN,
+        Serene: COLORS.GREEN,
+        Tranquil: COLORS.GREEN,
+        Peeved: COLORS.RED,
+        Furious: COLORS.RED,
+        Pleasant: COLORS.YELLOW,
+        Pleased: COLORS.YELLOW,
+        Glad: COLORS.YELLOW,
+        Pressured: COLORS.RED,
+        Secure: COLORS.GREEN,
+        Troubled: COLORS.RED,
+        Respected: COLORS.GREEN,
+        Rejected: COLORS.BLUE,
+        Jilted: COLORS.BLUE,
+        Betrayed: COLORS.BLUE,
+        Restless: COLORS.RED,
+        Supported: COLORS.GREEN,
+        Uneasy: COLORS.RED,
+        Valued: COLORS.GREEN,
+      };
+
+      const { DateTime } = luxon;
+
+      function parseDate(str) {
+        if (!str) return DateTime.invalid("Empty");
+        // Attempt specific "YYYY DayOfWeek Mon DD h:mm AM/PM" format
+        const parts = str.split(" ");
+        if (parts.length >= 6) {
+          const [year, , monStr, dayStr, timeStr, ampm] = parts;
+          const fmtStr = "d LLL yyyy h:mm a";
+          const dt = DateTime.fromFormat(`${dayStr} ${monStr} ${year} ${timeStr} ${ampm}`, fmtStr);
+          if (dt.isValid) return dt;
+        }
+        // Fallback to ISO
+        const iso = DateTime.fromISO(str);
+        return iso;
+      }
+
+      function generateMoodByMonth(entries, headers) {
+        console.log("Generating mood by month chart with:", entries.length, "entries");
+        const reportDiv = document.getElementById("report");
+        reportDiv.innerHTML = "";
+
+        const grouped = {}; // key -> { label, counts: { mood: n } }
+        const allMoods = new Set();
+
+        entries.forEach((entry) => {
+          const dt = parseDate(entry[headers.dateKey]);
+          if (!dt.isValid) return;
+          const monthKey = dt.toFormat("yyyy-MM");
+          const label = dt.toFormat("LLL yyyy");
+          const mood = entry[headers.moodKey]?.trim();
+          // Guard: skip if mood field looks like a date (safety against mis-detected columns)
+          if (!mood) return;
+          const possibleDate = parseDate(mood);
+          if (possibleDate && possibleDate.isValid) {
+            return;
+          }
+          if (!grouped[monthKey]) grouped[monthKey] = { label, counts: {} };
+          if (!grouped[monthKey].counts[mood]) grouped[monthKey].counts[mood] = 0;
+          grouped[monthKey].counts[mood]++;
+          allMoods.add(mood);
+        });
+
+        const monthKeys = Object.keys(grouped).sort(); // yyyy-MM lexicographic sort == chronological
+        const months = monthKeys.map((k) => grouped[k].label);
+        const moods = Array.from(allMoods).filter(Boolean).sort();
+        console.log("All detected moods:", moods);
+        const datasetMap = {};
+        moods.forEach((m) => (datasetMap[m] = []));
+
+        console.log("months", months);
+
+        monthKeys.forEach((k) => {
+          const moodCounts = grouped[k].counts;
+          moods.forEach((mood) => {
+            datasetMap[mood].push(moodCounts[mood] || 0);
+          });
+        });
+
+        console.log("moods", moods);
+
+        // --- Build 4-color percentage datasets ---
+        const DEFAULT_GREY = "rgba(158, 158, 158, 0.8)";
+        const greyMoods = new Set();
+
+        // Initialize data arrays for each color bucket
+        const colorBuckets = [
+          { key: COLORS.GREEN, label: "Low Energy Pleasant", data: [] },
+          { key: COLORS.YELLOW, label: "High Energy Pleasant", data: [] },
+          { key: COLORS.BLUE, label: "Low Energy Unpleasant", data: [] },
+          { key: COLORS.RED, label: "High Energy Unpleasant", data: [] },
+        ];
+
+        monthKeys.forEach((k) => {
+          const moodCounts = grouped[k].counts;
+          const colorTotals = { [COLORS.GREEN]: 0, [COLORS.YELLOW]: 0, [COLORS.BLUE]: 0, [COLORS.RED]: 0 };
+          let monthTotal = 0;
+          Object.entries(moodCounts).forEach(([mood, count]) => {
+            const color = moodColorMap[mood] || DEFAULT_GREY;
+            if (color === DEFAULT_GREY) {
+              greyMoods.add(mood);
+              return; // skip unmapped moods for percentage graph
+            }
+            colorTotals[color] += count;
+            monthTotal += count;
+          });
+          // Push percentage values (0-100) to each bucket
+          colorBuckets.forEach((b) => {
+            const pct = monthTotal ? (colorTotals[b.key] / monthTotal) * 100 : 0;
+            b.data.push(parseFloat(pct.toFixed(2)));
+          });
+        });
+
+        if (greyMoods.size) {
+          console.log("Moods without color mapping (excluded, rendered grey previously):", Array.from(greyMoods));
+        }
+
+        const datasets = colorBuckets.map((b) => ({
+          label: b.label,
+          data: b.data,
+          backgroundColor: b.key,
+          stack: "stacked",
+        }));
+
+        // ensure stacking order
+        datasets.sort((a, b) => colorOrder[a.backgroundColor] - colorOrder[b.backgroundColor]);
+
+        const container = document.createElement("div");
+        const title = document.createElement("h2");
+        title.className = "text-xl font-semibold mb-2";
+        title.innerText = "Mood Frequency by Month";
+        const canvas = document.createElement("canvas");
+        container.appendChild(title);
+        container.appendChild(canvas);
+        reportDiv.appendChild(container);
+
+        console.log("datasets", datasets);
+
+        new Chart(canvas, {
+          type: "bar",
+          data: {
+            labels: months,
+            datasets: datasets,
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              tooltip: { mode: "index", intersect: false },
+              legend: { display: false },
+              title: { display: true, text: "Mood Frequency per Month" },
+            },
+            scales: {
+              x: { stacked: true },
+              y: {
+                stacked: true,
+                beginAtZero: true,
+                max: 100,
+                ticks: {
+                  callback: (v) => v + "%",
+                },
+                title: { display: true, text: "Percentage" },
+              },
+            },
+          },
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        const saved = localStorage.getItem("ei_data");
+        if (saved) {
+          try {
+            console.log("Loading saved data from localStorage");
+            const { entries } = JSON.parse(saved);
+            console.log("Loaded entries:", entries);
+            console.log("Loaded headers:", headers);
+            generateMoodByMonth(entries, headers);
+          } catch (e) {
+            console.error("Failed to load saved EI data:", e);
+          }
+        }
+      });
+
+      document.getElementById("clearStorage").addEventListener("click", () => {
+        console.log("Clearing localStorage and reloading page");
+        localStorage.removeItem("ei_data");
+        location.reload();
+      });
+
+      document.getElementById("downloadJson").addEventListener("click", () => {
+        const saved = localStorage.getItem("ei_data");
+        if (!saved) return;
+        console.log("Downloading saved data as JSON");
+        const blob = new Blob([saved], { type: "application/json" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "ei_data.json";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+    </script>
+  </body>
+</html>
